@@ -1,0 +1,6 @@
+{
+  "name": "seo-analyzer-api",
+  "version": "1.0.0",
+  "scripts": { "start": "node index.js" },
+  "dependencies": { "@lazymac/seo-analyzer-api": "^1.0.9" }
+}
