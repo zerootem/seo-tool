@@ -1,18 +1,17 @@
 {
   "name": "seo-analyzer-api",
   "version": "1.0.0",
-  "description": "SEO Analyzer API - تحليل مواقع مجاني",
+  "description": "SEO Analyzer API",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "axios": "^1.6.0",
-    "cheerio": "^1.0.0-rc.12",
-    "jsdom": "^23.0.0"
+    "express": "4.18.2",
+    "axios": "1.5.1",
+    "cheerio": "1.0.0-rc.12"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": "18.x"
   }
 }
