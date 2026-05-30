@@ -1,4 +1,18 @@
+# مجلد dependencies
 node_modules/
+
+# ملفات البيئة
 .env
+.env.local
+
+# ملفات النظام
 .DS_Store
+Thumbs.db
+
+# سجلات الأخطاء
 *.log
+npm-debug.log*
+
+# ملفات مؤقتة
+.tmp/
+temp/
