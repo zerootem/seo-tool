@@ -1,10 +1,17 @@
 {
-  "name": "seo-api",
-  "version": "1.0.0",
-  "scripts": { "start": "node index.js" },
+  "name": "seo-api-full",
+  "version": "2.0.0",
+  "description": "SEO API متكامل لتحليل المواقع",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
   "dependencies": {
-    "express": "4.18.2",
-    "axios": "1.5.1",
-    "cheerio": "1.0.0-rc.12"
+    "express": "^4.18.2",
+    "axios": "^1.6.0",
+    "cheerio": "^1.0.0-rc.12"
+  },
+  "engines": {
+    "node": ">=16.0.0"
   }
 }
