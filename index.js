@@ -1,9 +1,3 @@
-app.use((req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST');
-    res.header('Access-Control-Allow-Headers', 'Content-Type');
-    next();
-});
 const express = require('express');
 const axios = require('axios');
 const cheerio = require('cheerio');
@@ -22,11 +16,12 @@ app.use((req, res, next) => {
     next();
 });
 
-// --- هذه هي نقطة النهاية (Endpoint) التي تبحث عنها أداة فحص الـ SEO ---
+// --- نقطة النهاية لفحص صحة الخادم ---
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', message: 'SEO API is running' });
 });
 
+// --- نقطة النهاية الرئيسية لتحليل SEO ---
 app.post('/api/v1/analyze', async (req, res) => {
     const { url } = req.body;
     if (!url) {
@@ -37,7 +32,7 @@ app.post('/api/v1/analyze', async (req, res) => {
         const response = await axios.get(url, { timeout: 15000 });
         const $ = cheerio.load(response.data);
 
-        // --- تحليل سريع للمحتوى ---
+        // تحليل العنوان
         const title = $('title').text().trim();
         const metaDesc = $('meta[name="description"]').attr('content') || '';
         const h1Count = $('h1').length;
@@ -47,7 +42,7 @@ app.post('/api/v1/analyze', async (req, res) => {
         let imagesWithAlt = 0;
         images.each((i, img) => { if ($(img).attr('alt')) imagesWithAlt++; });
 
-        // حساب درجة تقريبية
+        // حساب الدرجة
         let score = 70;
         let issues = [];
         
@@ -62,7 +57,7 @@ app.post('/api/v1/analyze', async (req, res) => {
         score = Math.max(0, Math.min(100, score));
         let grade = score >= 90 ? 'A' : score >= 80 ? 'B' : score >= 70 ? 'C' : score >= 60 ? 'D' : 'F';
         
-        // إرسال النتيجة بصيغة تتوافق مع أداة فحص SEO
+        // إرسال النتيجة
         res.json({
             url,
             overallScore: score,
