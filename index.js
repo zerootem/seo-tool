@@ -1,276 +1,200 @@
 const express = require('express');
 const axios = require('axios');
 const cheerio = require('cheerio');
-const { JSDOM } = require('jsdom');
 
 const app = express();
 app.use(express.json());
 
-// منفذ Railway أو المنفذ الافتراضي 3400
 const PORT = process.env.PORT || 3400;
 
-// ==================== دوال التحليل الرئيسية ====================
+// ==================== دوال التحليل ====================
 
-// تحليل عنوان الصفحة
-function analyzeTitle($, url) {
-    let title = $('title').text().trim();
-    let score = 0;
-    let issues = [];
-    let recommendations = [];
-
-    if (!title) {
-        issues.push('الصفحة لا تحتوي على عنوان (Title)');
-        recommendations.push('أضف وصف عنوان بين 30-60 حرفاً');
-    } else {
-        let length = title.length;
-        if (length >= 30 && length <= 60) {
-            score = 100;
-        } else if (length < 30) {
-            score = 50;
-            issues.push('العنوان قصير جداً (' + length + ' حرف)');
-            recommendations.push('العنوان المثالي بين 30-60 حرفاً');
-        } else if (length > 60) {
-            score = 60;
-            issues.push('العنوان طويل جداً (' + length + ' حرف)');
-            recommendations.push('قصّر العنوان ليكون أقل من 60 حرفاً');
-        }
-    }
-    return { score, issues, recommendations, content: title, length: title.length };
-}
-
-// تحليل وصف الميتا
-function analyzeMetaDescription($) {
-    let meta = $('meta[name="description"]').attr('content') || '';
-    let length = meta.length;
-    let score = 0;
-    let issues = [];
-    let recommendations = [];
-
-    if (!meta) {
-        issues.push('الصفحة تفتقد إلى وصف ميتا');
-        recommendations.push('أضف وصفاً بين 120-160 حرفاً يحتوي على الكلمة المفتاحية');
-    } else if (length >= 120 && length <= 160) {
-        score = 100;
-    } else if (length < 120) {
-        score = 50;
-        issues.push('الوصف قصير (' + length + ' حرف)');
-        recommendations.push('زد طول الوصف إلى 120-160 حرفاً');
-    } else {
-        score = 60;
-        issues.push('الوصف طويل (' + length + ' حرف)');
-        recommendations.push('قصّر الوصف ليكون أقل من 160 حرفاً');
-    }
-    return { score, issues, recommendations, content: meta, length };
-}
-
-// تحليل العناوين (H1, H2, H3)
-function analyzeHeadings($) {
-    let h1Count = $('h1').length;
-    let h1Text = $('h1').first().text().trim();
-    let h2Count = $('h2').length;
-    let issues = [];
-    let recommendations = [];
-    let score = 70;
-
-    if (h1Count === 0) {
-        issues.push('لا يوجد عنوان H1 في الصفحة');
-        recommendations.push('أضف عنوان H1 واحد يحتوي على الكلمة المفتاحية الرئيسية');
-        score = 30;
-    } else if (h1Count > 1) {
-        issues.push('يوجد ' + h1Count + ' عناوين H1');
-        recommendations.push('استخدم عنوان H1 واحد فقط لكل صفحة');
-        score = 50;
-    } else if (!h1Text) {
-        issues.push('عنوان H1 فارغ');
-        recommendations.push('أضف محتوى نصياً لعنوان H1');
-        score = 40;
-    }
-
-    if (h2Count === 0) {
-        issues.push('لا توجد عناوين فرعية H2');
-        recommendations.push('استخدم عناوين H2 لتنظيم المحتوى');
-    }
-
-    return { score, issues, recommendations, h1Count, h2Count, h1Text };
-}
-
-// تحليل الصور
-function analyzeImages($) {
-    let images = $('img');
-    let total = images.length;
-    let withAlt = 0;
-    let issues = [];
-    let recommendations = [];
-
-    images.each((i, img) => {
-        let alt = $(img).attr('alt');
-        if (alt && alt.trim() !== '') {
-            withAlt++;
-        }
-    });
-
-    let score = total === 0 ? 100 : Math.round((withAlt / total) * 100);
-    
-    if (total > 0 && withAlt < total) {
-        issues.push((total - withAlt) + ' صورة بدون نص Alt');
-        recommendations.push('أضف نصاً وصفياً (Alt) لجميع الصور');
-    }
-
-    return { score, issues, recommendations, total, withAlt };
-}
-
-// تحليل الروابط
-function analyzeLinks($, baseUrl) {
-    let links = $('a');
-    let total = links.length;
-    let internal = 0;
-    let external = 0;
-    let issues = [];
-    let recommendations = [];
-
-    let baseDomain = new URL(baseUrl).hostname;
-
-    links.each((i, link) => {
-        let href = $(link).attr('href');
-        if (href && !href.startsWith('#') && !href.startsWith('javascript:')) {
-            try {
-                let linkUrl = new URL(href, baseUrl);
-                if (linkUrl.hostname === baseDomain) {
-                    internal++;
-                } else {
-                    external++;
-                }
-            } catch(e) {
-                // تجاهل الروابط غير الصالحة
-            }
-        }
-    });
-
-    let score = total === 0 ? 50 : Math.min(100, Math.round((internal / total) * 100) + 20);
-    
-    if (internal < 3 && total > 0) {
-        issues.push('عدد قليل من الروابط الداخلية');
-        recommendations.push('أضف 3-5 روابط داخلية لمقالات ذات صلة');
-    }
-
-    return { score, issues, recommendations, total, internal, external };
-}
-
-// ==================== نقاط النهاية API ====================
-
-// تحليل موقع واحد
-app.post('/api/v1/analyze', async (req, res) => {
-    const { url } = req.body;
-    
-    if (!url) {
-        return res.status(400).json({ error: 'الرجاء إدخال رابط الصفحة' });
-    }
-
+async function analyzeUrl(url) {
     try {
         const response = await axios.get(url, {
-            headers: { 'User-Agent': 'SEO-Analyzer-Bot/1.0' },
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
             timeout: 15000
         });
         
         const $ = cheerio.load(response.data);
-        const dom = new JSDOM(response.data);
         
-        // تحليل جميع العناصر
-        const title = analyzeTitle($, url);
-        const metaDesc = analyzeMetaDescription($);
-        const headings = analyzeHeadings($);
-        const images = analyzeImages($);
-        const links = analyzeLinks($, url);
+        // 1. تحليل العنوان
+        const title = $('title').text().trim();
+        let titleScore = 0;
+        let titleIssues = [];
+        if (!title) {
+            titleIssues.push('الصفحة لا تحتوي على عنوان');
+        } else if (title.length < 30) {
+            titleIssues.push('العنوان قصير (' + title.length + ' حرف)');
+            titleScore = 50;
+        } else if (title.length > 60) {
+            titleIssues.push('العنوان طويل (' + title.length + ' حرف)');
+            titleScore = 60;
+        } else {
+            titleScore = 100;
+        }
+        
+        // 2. تحليل الميتا
+        const metaDesc = $('meta[name="description"]').attr('content') || '';
+        let metaScore = 0;
+        let metaIssues = [];
+        if (!metaDesc) {
+            metaIssues.push('لا يوجد وصف ميتا');
+        } else if (metaDesc.length < 120) {
+            metaIssues.push('الوصف قصير (' + metaDesc.length + ' حرف)');
+            metaScore = 50;
+        } else if (metaDesc.length > 160) {
+            metaIssues.push('الوصف طويل (' + metaDesc.length + ' حرف)');
+            metaScore = 60;
+        } else {
+            metaScore = 100;
+        }
+        
+        // 3. تحليل H1
+        const h1Count = $('h1').length;
+        let h1Score = 70;
+        let h1Issues = [];
+        if (h1Count === 0) {
+            h1Issues.push('لا يوجد عنوان H1');
+            h1Score = 30;
+        } else if (h1Count > 1) {
+            h1Issues.push('يوجد ' + h1Count + ' عناوين H1');
+            h1Score = 50;
+        }
+        
+        // 4. تحليل الصور
+        const images = $('img');
+        let imagesWithAlt = 0;
+        images.each((i, img) => {
+            const alt = $(img).attr('alt');
+            if (alt && alt.trim() !== '') imagesWithAlt++;
+        });
+        const imageScore = images.length === 0 ? 100 : Math.round((imagesWithAlt / images.length) * 100);
+        let imageIssues = [];
+        if (images.length > 0 && imagesWithAlt < images.length) {
+            imageIssues.push((images.length - imagesWithAlt) + ' صورة بدون نص Alt');
+        }
+        
+        // 5. تحليل الروابط
+        const links = $('a');
+        let internalLinks = 0;
+        let externalLinks = 0;
+        try {
+            const domain = new URL(url).hostname;
+            links.each((i, link) => {
+                const href = $(link).attr('href');
+                if (href && !href.startsWith('#') && !href.startsWith('javascript:')) {
+                    try {
+                        const linkUrl = new URL(href, url);
+                        if (linkUrl.hostname === domain) internalLinks++;
+                        else externalLinks++;
+                    } catch(e) {}
+                }
+            });
+        } catch(e) {}
+        
+        const linkScore = links.length === 0 ? 50 : Math.min(100, Math.round((internalLinks / links.length) * 100) + 20);
+        let linkIssues = [];
+        if (internalLinks < 3 && links.length > 0) {
+            linkIssues.push('عدد الروابط الداخلية قليل');
+        }
         
         // حساب الدرجة الإجمالية
-        const weights = { title: 0.25, metaDesc: 0.2, headings: 0.2, images: 0.15, links: 0.2 };
-        let overallScore = Math.round(
-            (title.score * weights.title) +
-            (metaDesc.score * weights.metaDesc) +
-            (headings.score * weights.headings) +
-            (images.score * weights.images) +
-            (links.score * weights.links)
+        const overallScore = Math.round(
+            (titleScore * 0.25) + (metaScore * 0.2) + (h1Score * 0.2) + 
+            (imageScore * 0.15) + (linkScore * 0.2)
         );
         
-        // تجميع جميع المشاكل والتوصيات
-        let allIssues = [];
-        let allRecommendations = [];
-        
-        [title, metaDesc, headings, images, links].forEach(cat => {
-            allIssues.push(...(cat.issues || []));
-            allRecommendations.push(...(cat.recommendations || []));
-        });
-        
-        // تحديد الدرجة الحرفية
         let grade = 'F';
         if (overallScore >= 90) grade = 'A';
         else if (overallScore >= 80) grade = 'B';
         else if (overallScore >= 70) grade = 'C';
         else if (overallScore >= 60) grade = 'D';
         
-        res.json({
+        // تجميع كل المشاكل
+        const allIssues = [...titleIssues, ...metaIssues, ...h1Issues, ...imageIssues, ...linkIssues];
+        const recommendations = allIssues.map(issue => {
+            if (issue.includes('عنوان')) return 'أضف عنواناً بين 30-60 حرفاً';
+            if (issue.includes('ميتا')) return 'أضف وصفاً بين 120-160 حرفاً';
+            if (issue.includes('H1')) return 'أضف عنوان H1 واحد يحتوي على الكلمة المفتاحية';
+            if (issue.includes('صورة')) return 'أضف نص Alt لجميع الصور';
+            if (issue.includes('روابط')) return 'أضف روابط داخلية لمقالات ذات صلة';
+            return 'حسّن عناصر SEO الأساسية';
+        });
+        
+        return {
             url,
             overallScore,
             grade,
             scores: {
-                title: title.score,
-                metaDescription: metaDesc.score,
-                headings: headings.score,
-                images: images.score,
-                links: links.score
+                title: titleScore,
+                metaDescription: metaScore,
+                headings: h1Score,
+                images: imageScore,
+                links: linkScore
             },
             summary: {
                 totalIssues: allIssues.length,
                 issues: allIssues.slice(0, 10),
-                recommendations: allRecommendations.slice(0, 10)
+                recommendations: recommendations.slice(0, 10)
             },
-            details: { title, metaDesc, headings, images, links }
-        });
+            details: {
+                wordCount: response.data.split(/\s+/).length,
+                imageCount: images.length,
+                imagesWithAlt: imagesWithAlt,
+                h1Count: h1Count,
+                internalLinks: internalLinks,
+                externalLinks: externalLinks
+            }
+        };
         
     } catch (error) {
-        console.error('خطأ:', error.message);
-        res.status(500).json({ 
-            error: 'فشل تحليل الصفحة',
-            details: error.message,
-            message: 'تأكد من أن الرابط صحيح والموقع متاح'
-        });
+        throw new Error('فشل تحليل الصفحة: ' + error.message);
+    }
+}
+
+// ==================== نقاط API ====================
+
+app.post('/api/v1/analyze', async (req, res) => {
+    const { url } = req.body;
+    if (!url) return res.status(400).json({ error: 'الرجاء إدخال رابط' });
+    
+    try {
+        const result = await analyzeUrl(url);
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
     }
 });
 
-// مقارنة موقعين
 app.post('/api/v1/compare', async (req, res) => {
     const { url1, url2 } = req.body;
-    
-    if (!url1 || !url2) {
-        return res.status(400).json({ error: 'الرجاء إدخال الرابطين' });
-    }
+    if (!url1 || !url2) return res.status(400).json({ error: 'الرجاء إدخال الرابطين' });
     
     try {
         const [result1, result2] = await Promise.all([
-            axios.post(`http://localhost:${PORT}/api/v1/analyze`, { url: url1 }),
-            axios.post(`http://localhost:${PORT}/api/v1/analyze`, { url: url2 })
+            analyzeUrl(url1),
+            analyzeUrl(url2)
         ]);
-        
         res.json({
-            url1: result1.data,
-            url2: result2.data,
-            comparison: {
-                scoreDifference: result1.data.overallScore - result2.data.overallScore,
-                winner: result1.data.overallScore >= result2.data.overallScore ? 'url1' : 'url2'
-            }
+            url1: result1,
+            url2: result2,
+            winner: result1.overallScore >= result2.overallScore ? 'url1' : 'url2'
         });
     } catch (error) {
-        res.status(500).json({ error: 'فشل في المقارنة' });
+        res.status(500).json({ error: error.message });
     }
 });
 
-// نقطة تحقق بسيطة
 app.get('/health', (req, res) => {
-    res.json({ status: 'ok', message: 'SEO API يعمل بشكل طبيعي' });
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// تشغيل الخادم
 app.listen(PORT, () => {
-    console.log(`🚀 SEO API يعمل على المنفذ ${PORT}`);
-    console.log(`📊 استخدم: POST ${PORT}/api/v1/analyze`);
+    console.log(`✅ SEO API يعمل على المنفذ ${PORT}`);
+});
+
+// معالجة الأخطاء العامة
+process.on('uncaughtException', (err) => {
+    console.error('خطأ غير متوقع:', err.message);
 });
